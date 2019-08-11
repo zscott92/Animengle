@@ -93,12 +93,13 @@ async function * createMatchGenerator(emotionData) {
 
 function parseAbout(about) {
     let match = about.match(
-        /^(?<stats>(?:[a-zA-z0-9- ]+:.+\r?\n?)+)(?<about>(?:.+\r?\n?)+)?/i
+        // /^(?<stats>(?:[a-zA-z0-9- ]+:.+\r?\n?)+)(?<about>(?:.+\r?\n?)+)?/i
+        /^((?:[a-zA-z0-9- ]+:.+\r?\n?)+)((?:.+\r?\n?)+)?/i
     );
     // console.log(match);
     if (match) {
         const output = {};
-        const stats = match.groups.stats;
+        const stats = match[1];
         output.stats = {
             hair: stats.match(/Hair:\s?(.*[a-zA-z]*?)/),
             eyes: stats.match(/Eyes:\s?(.*[a-zA-z]*?)/),
@@ -117,13 +118,9 @@ function parseAbout(about) {
             k => (output.stats[k] = output.stats[k] && output.stats[k][1])
         );
 
-        output.about =
-            match.groups.about &&
-            match.groups.about.replace(/\(Source:.+\).*|No voice.*/i, "");
+        output.about = match[2] && match[2].replace(/\(Source:.+\).*|No voice.*/i, "");
         output.raw = about;
-        output.source =
-            match.groups.about &&
-            match.groups.about.match(/\(Source:.+\).*|No voice.*/i);
+        output.source = match[2] && match[2].match(/\(Source:.+\).*|No voice.*/i);
         output.source = output.source && output.source[0];
 
         return output;
@@ -131,28 +128,27 @@ function parseAbout(about) {
     // other bios
     // console.log(about);
     match = about.match(
-        /(?<about>(?:.+\r?\n?)+?)(?<source>(?:\(Source:.+\).*|No voice.*))?/
+        /((?:.+\r?\n?)+?)((?:\(Source:.+\).*|No voice.*))?/
     );
     // console.log(match);
     if (match) {
         output = {
-            about: match.groups.about,
-            source: match.groups.source,
+            about: match[1],
+            source: match[2],
             raw: about
         };
 
-        let age = match.groups.about.match(/(\d*) years? old/i);
+        let age = match[1].match(/(\d*) years? old/i);
         if (age) {
             output.stats = { age: age[1] };
         } else {
-            age = match.groups.about.match(/age:\s?(\d*)/i)
+            age = match[1].match(/age:\s?(\d*)/i)
             if (age) {
                 output.stats = { age: age[1] };
             }
         }
 
-        output.about =
-            output.about && output.about.replace(/\(Source:.+\).*|No voice.*/i, "");
+        output.about = output.about && output.about.replace(/\(Source:.+\).*|No voice.*/i, "");
 
         return output;
     }
