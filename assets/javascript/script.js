@@ -1,97 +1,105 @@
-function getMatch(faceResponse) {
-    const emotions = faceResponse.faces[0].attributes.emotion;
+let matchGenerator;
+apiDelay = () => new Promise(resolve => setTimeout(resolve, 550));
+
+async function * createMatchGenerator(emotionData) {
+    let currentEmotion;
+    let page = 1;
+    let checkNextPage = false;
+    let searchResponse = [];
+    let delay = apiDelay();
 
     const transform = {
-        anger: "yandere",
-        neutral: "mecha",
+        anger: "mecha",
+        neutral: "catgirl",
         disgust: "tsundere",
-        sadness: "catgirl",
+        sadness: "yandere",
         fear: "yandere",
         happiness: "gyaru",
         surprise: "magical girl",
     };
 
-    let rand = Math.random() * 100;
-
-    const emotion = (function getEmotion(emotions) {
-        for (e in emotions) {
-            rand -= emotions[e];
-            if (rand <= 0) {
-                return e;
+    while (true) {
+        await delay;
+        console.log(searchResponse.length);
+        if (!searchResponse.length) {
+            console.log('debug');
+            if (checkNextPage) {
+                page ++;
+                const response = await $.get("https://api.jikan.moe/v3/search/character/?" + $.param({ q: transform[currentEmotion], page: page }));
+                delay = apiDelay();
+                if (response.results) {
+                    checkNextPage = response.results.length == 50;
+                    searchResponse = response.results;
+                    continue;
+                } else {
+                    checkNextPage = false;
+                    page = 1;
+                    continue;
+                }
             }
+            console.log('debug 2')
+
+            page = 1;
+
+            console.log(emotionData);
+            
+            // choose a new emotion
+            let rand = Math.random() * 100;
+            currentEmotion = (function getEmotion(emotions) {
+                for (e in emotions) {
+                    rand -= emotions[e];
+                    if (rand <= 0) {
+                        return e;
+                    }
+                }
+            })(emotionData);
+            console.log(emotionData[currentEmotion]);
+            // Transform the remaining emotions to add up to 1
+            const divisor = 100 - emotionData[currentEmotion];
+            for (e in emotionData) {
+                emotionData[e] = emotionData[e] / divisor * 100;
+            }
+            console.log(emotionData);
+            // Remove the chosen emotion from the object
+            delete emotionData[currentEmotion];
+
+            const response = await $.get("https://api.jikan.moe/v3/search/character/?" + $.param({ q: transform[currentEmotion], page: page }));
+            console.log(response);
+            checkNextPage = response.results.length == 50;
+            searchResponse = response.results;
+            delay = apiDelay();
+            continue;
         }
-    })(emotions);
 
-    console.log(emotion);
+        // We have more characters to check
+        delay = apiDelay() // first, set up a new delay timer
+        const randEntry = searchResponse.splice(Math.floor(Math.random() * searchResponse.length), 1)[0];
+        const charDetails = await $.get(`https://api.jikan.moe/v3/character/${randEntry.mal_id}`);
+        const charProto = Object.assign(
+            parseAbout(charDetails.about), {
+                name: charDetails.name,
+                featured: charDetails.animeography,
+                image_url: charDetails.image_url
+            });
 
-    const key = transform[emotion];
-    const queryString =
-        "https://api.jikan.moe/v3/search/character/?" + $.param({ q: key });
+        for (filter of profileFilters) {
+            // Start over if the profile fails a test
+            if (!filter(charProto)) continue;
+        }
 
-    console.log(queryString);
-
-    return $.get(queryString)
-        .then(function (results) {
-            const resultCount = results.results.length;
-
-            let sample = getRandom(
-                filterRepeats(results.results),
-                resultCount > 9 ? 10 : resultCount
-            );
-            console.log(sample);
-
-            if (!sample) {
-                // If we have exhausted the results of this query, make a new one
-                return getMatch(faceResponse);
-            }
-
-            return Promise.all(
-                sample.map(async (item, index) => {
-                    // Will return an array of ajax promises
-                    console.log(item, index);
-                    await new Promise(resolve => setTimeout(resolve, 550 * index));
-                    console.log(`sending ${item} ${index}`);
-                    return $.get(`https://api.jikan.moe/v3/character/${item.mal_id}`);
-                })
-            );
-        })
-        .then(
-            // return of function will be promise-ified
-            function (results) {
-                // parse and filter results
-                console.log("debug");
-                console.log(results);
-                results = results.map(result => {
-                    console.log(result);
-                    const obj = parseAbout(result.about);
-                    obj.name = result.name;
-                    obj.featured = result.animeography;
-                    obj.image_url = result.image_url;
-                    return obj;
-                });
-                console.log(results);
-                results = profileFilters.reduce(
-                    (a, filter) => a.filter(filter),
-                    results
-                );
-                return results.map(p => new Profile(p));
-            }
-        );
+        yield new Profile(charProto);
+    }
 }
 
-// TODO find and fix the regex that is taking approximately until the end of time to calculate.
-// parse the 'about' string  we get from our ajax requests
 function parseAbout(about) {
-    // VNDB formatted bio
-    // console.log(about);
-    // console.log([...about].map(x => x.charCodeAt(0)));
     let match = about.match(
-        /^(?<stats>(?:[a-zA-z0-9- ]+:.+\r?\n?)+)(?<about>(?:.+\r?\n?)+)?/i
+        // /^(?<stats>(?:[a-zA-z0-9- ]+:.+\r?\n?)+)(?<about>(?:.+\r?\n?)+)?/i
+        /^((?:[a-zA-z0-9- ]+:.+\r?\n?)+)((?:.+\r?\n?)+)?/i
     );
-    console.log(match);
+    // console.log(match);
     if (match) {
         const output = {};
-        const stats = match.groups.stats;
+        const stats = match[1];
         output.stats = {
             hair: stats.match(/Hair:\s?(.*[a-zA-z]*?)/),
             eyes: stats.match(/Eyes:\s?(.*[a-zA-z]*?)/),
@@ -110,103 +118,63 @@ function parseAbout(about) {
             k => (output.stats[k] = output.stats[k] && output.stats[k][1])
         );
 
-        output.about =
-            match.groups.about &&
-            match.groups.about.replace(/\(Source:.+\).*|No voice.*/i, "");
+        output.about = match[2] && match[2].replace(/\(Source:.+\).*|No voice.*/i, "");
         output.raw = about;
-        output.source =
-            match.groups.about &&
-            match.groups.about.match(/\(Source:.+\).*|No voice.*/i);
+        output.source = match[2] && match[2].match(/\(Source:.+\).*|No voice.*/i);
         output.source = output.source && output.source[0];
 
         return output;
     }
     // other bios
-    console.log(about);
+    // console.log(about);
     match = about.match(
-        /(?<about>(?:.+\r?\n?)+?)(?<source>(?:\(Source:.+\).*|No voice.*))?/
+        /((?:.+\r?\n?)+?)((?:\(Source:.+\).*|No voice.*))?/
     );
-    console.log(match);
+    // console.log(match);
     if (match) {
         output = {
-            about: match.groups.about,
-            source: match.groups.source,
+            about: match[1],
+            source: match[2],
             raw: about
         };
 
-        let age = match.groups.about.match(/(\d*) years? old/i);
+        let age = match[1].match(/(\d*) years? old/i);
         if (age) {
             output.stats = { age: age[1] };
         } else {
-            age = match.groups.about.match(/age:\s?(\d*)/i)
+            age = match[1].match(/age:\s?(\d*)/i)
             if (age) {
                 output.stats = { age: age[1] };
             }
         }
 
-        output.about =
-            output.about && output.about.replace(/\(Source:.+\).*|No voice.*/i, "");
+        output.about = output.about && output.about.replace(/\(Source:.+\).*|No voice.*/i, "");
 
         return output;
     }
 }
 
-// https://stackoverflow.com/questions/19269545/how-to-get-n-no-elements-randomly-from-an-array
-function getRandom(arr, n) {
-    var result = new Array(n),
-        len = arr.length,
-        taken = new Array(len);
-    if (n > len) return false;
-    while (n--) {
-        var x = Math.floor(Math.random() * len);
-        result[n] = arr[x in taken ? taken[x] : x];
-        taken[x] = --len in taken ? taken[len] : len;
-    }
-    return result;
-}
-
-// function filterRepeats(arr) {
-//     return arr.filter(character => {
-//         loadedProfiles.forEach(profile => {
-//             const profName = profile.name.replace(',', '').split(' ');
-//             const charName = character.name.replace(',', '').split(' ');
-//             console.log(profName, charName);
-//             if ((profName[0] == charName[0] && profName[1] == charName[1]) ||
-//                 (profName[0] == charName[1] && profName[1] == charName[0])) {
-//                 return false;
-//             }
-//         });
-//         return true;
-//     })
-// }
-
-function filterRepeats(arr) {
-    return arr.filter(character => {
-        if (loadedNames.has(character.name)) {
-            return false;
-        } else {
-            loadedNames.add(character.name);
-            return true;
-        }
-    });
-}
-
 let loadedProfiles = new Set([]);
-let loadedNames = new Set([]);
 let loading = false;
-let faceData;
 
 function loadMore() {
     drawLoadScreen();
-    getMatch(faceData).then(function (results) {
+    return matchGenerator.next().then(function (profile) {
         $("#loading-card").remove();
-        results.forEach(result => loadedProfiles.add(result));
-        $("#profile-space").append(
-            ...results.map(profile => {
-                return profile.buildNode();
-            })
-        );
+        $('#profile-space').append(profile.value.buildNode());
+        loadedProfiles.add(profile.value);
         loading = false;
+
+        // If we're scrolled to the loading screen when loading finishes, we want to immediately load another.
+        const margin = parseInt($('.profile').css('margin-left').replace('px', '') * 2);
+        const profileSpace = $('#profile-space')
+        const width = profileSpace.width() + margin;
+        const page = (profileSpace.scrollLeft() + margin / 2) / width;
+        const pageCiel = Math.ceil(page);
+        // console.log(page, loadedProfiles.size);
+        if (pageCiel == loadedProfiles.size) {
+            loadMore();
+        }
     });
 }
 
@@ -222,30 +190,14 @@ function drawLoadScreen() {
     }
 }
 
-// // for debugging
-// getMatch(faceData).then(
-//     function (results) {
-//         console.log(results);
-//         results.forEach(result => loadedProfiles.add(result));
-//         $('#profile-space').append(
-//             ...results.map(profile => {
-//                 return profile.buildNode()
-//             })
-//         );
-//     }
-// )
-
-// loadMore();
-
 function requestFaceData(selectImgFile) {
     let data = new FormData();
     data.append("api_key", "ck3PwAKq4ZDsnbx77dyZG3lEk_YDwCIz");
     data.append("api_secret", "Epcw27lJerS2w28JQvd2DYhG_Rs-LjFJ");
-    //data.append("image_url", "https://cdn.cnn.com/cnnnext/dam/assets/190802164147-03-trump-rally-0801-large-tease.jpg");
     data.append("image_file", selectImgFile);
     data.append(
         "return_attributes",
-        "gender,age,smiling,headpose,emotion,ethnicity,mouthstatus,eyegaze"
+        "emotion"
     );
 
     console.log(data);
@@ -348,23 +300,7 @@ function setupProfileSpace() {
             $('.scroll-button-wrapper.scroll-right button').removeClass('is-static');
         }
 
-        if (scrollSnapEnabled) {
-            if ((Math.abs(page - currentPage) > 1)) {
-
-                page = Math.floor(page) + (currentPage - page > 1 ? 1 : 0);
-                profileSpace.css({ 'overflow-x': 'hidden' });
-                setTimeout(function () {
-                    $('#profile-space').css({ 'overflow-x': '' })
-                }, 10);
-
-                profileSpace.scrollLeft(page * width - margin / 2);
-                console.log('scrolling locked to page ' + page)
-            }
-        }
-
         if (!(page % 1) && page != currentPage) { // we have scrolled to a new page
-            console.log(page);
-            console.log(currentPage);
             $(`#profile-space .profile:nth-child(${currentPage + 1})`).scrollTop(0);
             currentPage = page;
             if (page == loadedProfiles.size - 1 && !loading) {
@@ -377,11 +313,10 @@ function setupProfileSpace() {
         }
     });
     $('.scroll-button').on('click', function (event) {
-        console.log('scroll');
-        scrollSnapEnabled = false;
-        new Promise(resolve => setTimeout(resolve, 100)).then(
-            x => scrollSnapEnabled = true
-        )
+        // scrollSnapEnabled = false;
+        // new Promise(resolve => setTimeout(resolve, 100)).then(
+        //     () => scrollSnapEnabled = true
+        // )
         const profileSpace = $('#profile-space');
         const scrollIncrement = profileSpace.width();
         profileSpace.scrollLeft(profileSpace.scrollLeft() + parseInt($(this).attr('data-scroll')) * scrollIncrement);
@@ -401,15 +336,10 @@ $('#splash-button').on('click', function () {
 });
 
 $('#home-button').on('click', function () {
-    console.log('debug');
     location.reload();
 });
 
 $('input[type=file]').change(function (e) {
-    // const vals = $(this).val();
-    // val = vals.length ? vals.split('\\').pop() : '';
-    // const fr = new FileReader();
-    // const bin = fr.readAsBinaryString(val);
     const path = $(this).val();
     const match = path.match(/\.(png|jpg|jpeg|gif)$/);
     if (match) {
@@ -418,8 +348,10 @@ $('input[type=file]').change(function (e) {
         $('#profile-space').scrollLeft(0);
         requestFaceData(e.target.files[0]).then(
             function (results) {
-                faceData = JSON.parse(results);
-                loadMore();
+                console.log(results.face);
+                matchGenerator = createMatchGenerator(JSON.parse(results).faces[0].attributes.emotion);
+
+                loadMore().then(loadMore);
             }
         );
     }

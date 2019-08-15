@@ -2,12 +2,11 @@ profileFilters = [
   // filters take the mostly processed data we use to make profiles as input
   function(p) {
     // filter out profiles that don't have a bio
-    console.log(p.about);
     return p.about && p.about != "No biography written.";
   },
   function(p) {
     // filter by gender
-    const match = p.about.match(/(?:^|\s)(he|she|him|her|his)(?:\s|$)/i);
+    const match = p.about && p.about.match(/(?:^|\s)(he|she|him|her|his)(?:\s|$)/i);
     return !(match && ["he", "him", "his"].includes(match[1].toLowerCase()));
   },
   // Content filters
